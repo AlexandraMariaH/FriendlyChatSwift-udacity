@@ -17,6 +17,7 @@
 import UIKit
 import Firebase
 import FirebaseAuthUI
+import FirebaseGoogleAuthUI
 
 // MARK: - FCViewController
 
@@ -53,10 +54,8 @@ class FCViewController: UIViewController, UINavigationControllerDelegate {
     // MARK: Life Cycle
     
     override func viewDidLoad() {
-        self.signedInStatus(isSignedIn: true)
-        print("VIEW DID LOAD")
-        
-        // TODO: Handle what users see when view loads
+        configureAuth()
+       // configureDatabase()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -67,20 +66,52 @@ class FCViewController: UIViewController, UINavigationControllerDelegate {
     // MARK: Config
     
     func configureAuth() {
-        // TODO: configure firebase authentication
+        let provider: [FUIAuthProvider] = [FUIGoogleAuth()]
+        FUIAuth.defaultAuthUI()?.providers = provider
+        
+        // listen for changes in the authorization state
+        _authHandle = Auth.auth().addStateDidChangeListener { (auth: Auth, user: User?) in
+            // refresh table data
+            self.messages.removeAll(keepingCapacity: false)
+            self.messagesTable.reloadData()
+            
+            // check if there is a current user
+            if let activeUser = user {
+                // check if the current app user is the current FIRUser
+                if self.user != activeUser {
+                    self.user = activeUser
+                    self.signedInStatus(isSignedIn: true)
+                    let name = user!.email!.components(separatedBy: "@")[0]
+                    self.displayName = name
+                }
+            } else {
+                // user must sign in
+                self.signedInStatus(isSignedIn: false)
+                self.loginSession()
+            }
+        }
     }
     
     func configureDatabase() {
         // TODO: configure database to sync messages
-         FirebaseApp.configure()
-         ref = Database.database().reference()    }
+        //FirebaseApp.configure()
+            ref = Database.database().reference()
+                //creating a listener specify the path where we can listen to changes by path the observe method is to know which
+                //events we can to lisent too.
+            _refHandle = ref.child("messages").observe(.childAdded) { (snapshot: DataSnapshot) in
+                self.messages.append(snapshot)
+                self.messagesTable.insertRows(at: [IndexPath(row: self.messages.count - 1, section: 0)], with: .automatic)
+                self.scrollToBottomMessage()
+            }
+    }
     
     func configureStorage() {
         // TODO: configure storage using your firebase storage
     }
     
     deinit {
-        // TODO: set up what needs to be deinitialized when view is no longer being used
+        ref.child("messages").removeObserver(withHandle: _refHandle)
+        Auth.auth().removeStateDidChangeListener(_authHandle)
     }
     
     // MARK: Remote Config
@@ -208,6 +239,13 @@ extension FCViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         // dequeue cell
         let cell: UITableViewCell! = messagesTable.dequeueReusableCell(withIdentifier: "messageCell", for: indexPath)
+        // unpack message from firebase data snapshot
+        let messageSnapshot: DataSnapshot! = messages[indexPath.row]
+        let message = messageSnapshot.value as! [String:String]
+        let name = message[Constants.MessageFields.name] ?? "[username]"
+        let text = message[Constants.MessageFields.text] ?? "[message]"
+        cell!.textLabel?.text = name + ": " + text
+        cell!.imageView?.image = self.placeholderImage
         return cell!
         // TODO: update cell to display message data
     }
